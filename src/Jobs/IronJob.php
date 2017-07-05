@@ -2,11 +2,11 @@
 
 namespace Collective\IronQueue\Jobs;
 
-use Collective\IronQueue\IronQueue;
-use Illuminate\Container\Container;
-use Illuminate\Contracts\Queue\Job as JobContract;
-use Illuminate\Queue\Jobs\Job;
 use Illuminate\Support\Arr;
+use Illuminate\Queue\Jobs\Job;
+use Illuminate\Container\Container;
+use Collective\IronQueue\IronQueue;
+use Illuminate\Contracts\Queue\Job as JobContract;
 
 class IronJob extends Job implements JobContract
 {
@@ -63,6 +63,18 @@ class IronJob extends Job implements JobContract
         list($class, $method) = $this->parseJob($payload['job']);
         $this->instance = $this->resolve($class);
         $this->instance->{$method}($this, $payload['data']);
+    }
+
+    /**
+     * Parse the job declaration into class and method.
+     *
+     * @param  string  $job
+     * @return array
+     */
+    protected function parseJob($job)
+    {
+        $segments = explode('@', $job);
+        return count($segments) > 1 ? $segments : [$segments[0], 'fire'];
     }
 
     /**

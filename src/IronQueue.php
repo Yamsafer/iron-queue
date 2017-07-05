@@ -2,13 +2,15 @@
 
 namespace Collective\IronQueue;
 
+use IronMQ\IronMQ;
+use Illuminate\Support\Arr;
+use Illuminate\Queue\Queue;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use InvalidArgumentException;
 use Collective\IronQueue\Jobs\IronJob;
 use Illuminate\Contracts\Encryption\Encrypter;
 use Illuminate\Contracts\Queue\Queue as QueueContract;
-use Illuminate\Http\Request;
-use Illuminate\Http\Response;
-use Illuminate\Queue\Queue;
-use IronMQ\IronMQ;
 
 class IronQueue extends Queue implements QueueContract
 {
@@ -108,7 +110,7 @@ class IronQueue extends Queue implements QueueContract
      */
     public function recreate($payload, $queue, $delay)
     {
-        $options = ['delay' => $this->getSeconds($delay)];
+        $options = ['delay' => $this->secondsUntil($delay)];
 
         return $this->pushRaw($payload, $queue, $options);
     }
@@ -125,7 +127,7 @@ class IronQueue extends Queue implements QueueContract
      */
     public function later($delay, $job, $data = '', $queue = null)
     {
-        $delay = $this->getSeconds($delay);
+        $delay = $this->secondsUntil($delay);
 
         $payload = $this->createPayload($job, $data, $queue);
 
@@ -222,9 +224,72 @@ class IronQueue extends Queue implements QueueContract
      */
     protected function createPayload($job, $data = '', $queue = null)
     {
-        $payload = $this->setMeta(parent::createPayload($job, $data), 'attempts', 1);
+        $payload = $this->setMeta($this->legacyCreatePayload($job, $data), 'attempts', 1);
 
         return $this->setMeta($payload, 'queue', $this->getQueue($queue));
+    }
+
+    /**
+     * Set additional meta on a payload string.
+     *
+     * @param  string  $payload
+     * @param  string  $key
+     * @param  string  $value
+     * @return string
+     *
+     * @throws \InvalidArgumentException
+     */
+    protected function setMeta($payload, $key, $value)
+    {
+        $payload = json_decode($payload, true);
+
+        $payload = json_encode(Arr::set($payload, $key, $value));
+
+        if (JSON_ERROR_NONE !== json_last_error()) {
+            throw new InvalidArgumentException('Unable to create payload: '.json_last_error_msg());
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Create a payload string from the given job and data.
+     *
+     * @param  string  $job
+     * @param  mixed   $data
+     * @param  string  $queue
+     * @return string
+     *
+     * @throws \InvalidArgumentException
+     */
+    protected function legacyCreatePayload($job, $data = '', $queue = null)
+    {
+        if (is_object($job)) {
+            $payload = json_encode([
+                'job' => 'Illuminate\Queue\CallQueuedHandler@call',
+                'data' => [
+                    'commandName' => get_class($job),
+                    'command' => serialize(clone $job),
+                ],
+            ]);
+        } else {
+            $payload = json_encode($this->createPlainPayload($job, $data));
+        }
+        if (JSON_ERROR_NONE !== json_last_error()) {
+            throw new InvalidArgumentException('Unable to create payload: '.json_last_error_msg());
+        }
+        return $payload;
+    }
+    /**
+     * Create a typical, "plain" queue payload array.
+     *
+     * @param  string  $job
+     * @param  mixed  $data
+     * @return array
+     */
+    protected function createPlainPayload($job, $data)
+    {
+        return ['job' => $job, 'data' => $data];
     }
 
     /**
